@@ -1,0 +1,10 @@
+.DS_Store
+
+# SwiftPM / local build outputs
+.build/
+.swiftpm/
+.swiftpm-cache/
+dist/
+
+# Local-only notes
+LOCAL_NOTES.local.md
