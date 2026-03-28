@@ -1,4 +1,12 @@
-# Lock
+<p align="center">
+  <img src="docs/lock-logo.png" alt="Lock logo" width="96" height="96">
+</p>
+
+<h1 align="center">Lock</h1>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/version-0.1.0-3b82f6" alt="Version 0.1.0">
+</p>
 
 `Lock` is a native macOS menu bar app that lets you protect selected apps with your own password.
 
@@ -36,14 +44,14 @@ Without Accessibility and Screen Recording, the app cannot reliably detect, hide
 Build the local app bundle:
 
 ```bash
-cd /Users/zohaibarsalan/Developer/lock
+cd /path/to/lock
 ./scripts/build_app.sh
 ```
 
 This creates:
 
 ```text
-/Users/zohaibarsalan/Developer/lock/dist/Lock.app
+dist/Lock.app
 ```
 
 ## Run
@@ -51,7 +59,7 @@ This creates:
 For local development, build and open the app bundle:
 
 ```bash
-cd /Users/zohaibarsalan/Developer/lock
+cd /path/to/lock
 ./scripts/run_app.sh
 ```
 
@@ -62,7 +70,7 @@ Do not use `swift run` as the normal workflow. It keeps the app attached to Term
 Install `Lock.app` into `/Applications`:
 
 ```bash
-cd /Users/zohaibarsalan/Developer/lock
+cd /path/to/lock
 ./scripts/install_app.sh
 ```
 
@@ -148,7 +156,7 @@ If you want to remove the installed app and local build artifacts before rebuild
 Then rebuild:
 
 ```bash
-cd /Users/zohaibarsalan/Developer/lock
+cd /path/to/lock
 ./scripts/install_app.sh
 ```
 
