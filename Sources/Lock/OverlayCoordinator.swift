@@ -13,6 +13,8 @@ final class OverlayCoordinator: NSObject, ObservableObject {
     private var completions: [pid_t: (Bool) -> Void] = [:]
     private var syncTimer: Timer?
     private var activeProcessID: pid_t?
+    private var focusedUnlockProcessID: pid_t?
+    private var focusedUnlockUntil: Date?
 
     init(lockStore: LockStore, activityLog: ActivityLogStore) {
         self.lockStore = lockStore
@@ -43,6 +45,7 @@ final class OverlayCoordinator: NSObject, ObservableObject {
         lockedSessions[processID] = session
         completions[processID] = completion
         app.hide()
+        markUnlockFocused(processID: processID)
         syncShieldWindows(processID: processID, makeKey: true)
         updateSyncTimer()
     }
@@ -61,20 +64,32 @@ final class OverlayCoordinator: NSObject, ObservableObject {
 
         refreshStoredTargets(processID: processID)
         app.hide()
+        if makeKey {
+            markUnlockFocused(processID: processID)
+        }
         syncShieldWindows(processID: processID, makeKey: makeKey)
     }
 
     func activeApplicationChanged(to processID: pid_t) {
+        if let focusedUnlockProcessID,
+           focusedUnlockProcessID != processID,
+           focusedUnlockUntil.map({ $0 > Date() }) == true,
+           lockedSessions[focusedUnlockProcessID] != nil {
+            bringLockWindowsToFront(processID: focusedUnlockProcessID, makeKey: true)
+            return
+        }
+
         activeProcessID = processID
 
         for lockedProcessID in Array(lockedSessions.keys) {
             if lockedProcessID == processID {
                 refreshStoredTargets(processID: lockedProcessID)
                 lockedSessions[lockedProcessID]?.app.hide()
+                markUnlockFocused(processID: lockedProcessID)
                 syncShieldWindows(processID: lockedProcessID, makeKey: true)
             } else {
                 lockedSessions[lockedProcessID]?.app.hide()
-                orderOutLockWindows(processID: lockedProcessID)
+                sendLockWindowsBehindActiveApp(processID: lockedProcessID)
             }
         }
     }
@@ -121,7 +136,7 @@ final class OverlayCoordinator: NSObject, ObservableObject {
         if activeProcessID == nil || activeProcessID == processID || makeKey {
             bringLockWindowsToFront(processID: processID, makeKey: makeKey)
         } else {
-            orderOutLockWindows(processID: processID)
+            sendLockWindowsBehindActiveApp(processID: processID)
         }
     }
 
@@ -134,10 +149,9 @@ final class OverlayCoordinator: NSObject, ObservableObject {
         )
         window.lockedProcessID = session.identity.processID
         window.shieldID = target.id
-        window.level = .screenSaver
-        window.collectionBehavior = [.fullScreenAuxiliary, .transient, .ignoresCycle]
-        window.isExcludedFromWindowsMenu = true
-        window.isFloatingPanel = false
+        window.level = isInteractive ? .modalPanel : .floating
+        window.collectionBehavior = [.managed, .fullScreenAuxiliary, .moveToActiveSpace]
+        window.isExcludedFromWindowsMenu = false
         window.hidesOnDeactivate = false
         window.isMovable = false
         window.isReleasedWhenClosed = false
@@ -153,6 +167,7 @@ final class OverlayCoordinator: NSObject, ObservableObject {
         let processID = session.identity.processID
         let sessionID = session.id
         window.isInteractiveShield = isInteractive
+        window.level = isInteractive ? .modalPanel : .floating
         window.onCommandQuit = { [weak self] in
             self?.quitLockedApp(processID: processID, sessionID: sessionID)
         }
@@ -256,15 +271,26 @@ final class OverlayCoordinator: NSObject, ObservableObject {
         }
 
         if makeKey, let keyWindow = orderedWindows.first(where: \.isInteractiveShield) {
+            markUnlockFocused(processID: processID)
             NSApp.activate(ignoringOtherApps: true)
             keyWindow.makeKeyAndOrderFront(nil)
         }
     }
 
-    private func orderOutLockWindows(processID: pid_t) {
-        lockWindows[processID]?.values.forEach { window in
-            window.orderOut(nil)
+    private func sendLockWindowsBehindActiveApp(processID: pid_t) {
+        if focusedUnlockProcessID == processID,
+           focusedUnlockUntil.map({ $0 > Date() }) == true {
+            return
         }
+
+        lockWindows[processID]?.values.forEach { window in
+            window.orderBack(nil)
+        }
+    }
+
+    private func markUnlockFocused(processID: pid_t) {
+        focusedUnlockProcessID = processID
+        focusedUnlockUntil = Date().addingTimeInterval(2.0)
     }
 
     private func attemptUnlock(password: String, processID: pid_t, sessionID: UUID) -> Bool {
@@ -325,6 +351,11 @@ final class OverlayCoordinator: NSObject, ObservableObject {
         let session = lockedSessions.removeValue(forKey: processID)
         let windows = lockWindows.removeValue(forKey: processID)
         let completion = completions.removeValue(forKey: processID)
+
+        if focusedUnlockProcessID == processID {
+            focusedUnlockProcessID = nil
+            focusedUnlockUntil = nil
+        }
 
         windows?.values.forEach { window in
             window.orderOut(nil)
@@ -410,7 +441,7 @@ private struct AXWindowSnapshot {
     let frame: NSRect
 }
 
-final class LockOverlayPanel: NSPanel {
+final class LockOverlayPanel: NSWindow {
     var lockedProcessID: pid_t = 0
     var shieldID = ""
     var isInteractiveShield = false
