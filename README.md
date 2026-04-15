@@ -99,9 +99,9 @@ At a high level:
 1. `Lock` watches running applications.
 2. When a protected app opens or becomes active, `Lock` captures that app's window frame.
 3. `Lock` records the protected app's visible window bounds and hides the protected app.
-4. `Lock` creates one or more lock windows at the protected app's last known window bounds.
-5. One shield becomes interactive and asks for password or Touch ID when the protected app is active.
-6. On successful unlock, the shields are removed and the app is unhidden and brought forward.
+4. `Lock` creates one lock prompt at the protected app's last known outer window bounds.
+5. The prompt asks for password or Touch ID when the protected app is active.
+6. On successful unlock, the prompt is removed and the app is unhidden and brought forward.
 
 This is implemented with:
 
