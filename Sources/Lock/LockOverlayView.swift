@@ -30,30 +30,30 @@ struct LockOverlayView: View {
     private func overlayContent(isCompact: Bool) -> some View {
         ZStack {
             Rectangle()
-                .fill(Color.black.opacity(0.84))
+                .fill(Color(red: 0.035, green: 0.037, blue: 0.043))
                 .ignoresSafeArea()
 
-            VStack(spacing: isCompact ? 12 : 22) {
-                VStack(spacing: isCompact ? 8 : 14) {
+            VStack(spacing: isCompact ? 12 : 18) {
+                VStack(spacing: isCompact ? 8 : 12) {
                     Image(nsImage: appIcon)
                         .resizable()
-                        .frame(width: isCompact ? 40 : 72, height: isCompact ? 40 : 72)
-                        .clipShape(RoundedRectangle(cornerRadius: isCompact ? 10 : 18, style: .continuous))
+                        .frame(width: isCompact ? 38 : 64, height: isCompact ? 38 : 64)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
-                    VStack(spacing: isCompact ? 4 : 8) {
-                        Text("Locked")
-                            .font(.system(size: isCompact ? 22 : 32, weight: .bold, design: .rounded))
+                    VStack(spacing: isCompact ? 3 : 6) {
+                        Text("App Locked")
+                            .font(.system(size: isCompact ? 20 : 30, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
 
                         Text(appName)
-                            .font(.system(size: isCompact ? 13 : 17, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.88))
+                            .font(.system(size: isCompact ? 12 : 16, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.72))
                             .lineLimit(1)
 
                         if !isCompact {
-                            Text("Enter your password to keep using this app.")
+                            Text("Unlock with your password or Touch ID.")
                                 .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.64))
+                                .foregroundStyle(.white.opacity(0.54))
                                 .multilineTextAlignment(.center)
                         }
                     }
@@ -70,8 +70,13 @@ struct LockOverlayView: View {
 
                             if touchIDAvailable {
                                 Button(action: onTouchID) {
-                                    Image(systemName: "touchid")
-                                        .frame(width: 18, height: 18)
+                                    if isCompact {
+                                        Image(systemName: "touchid")
+                                            .frame(minWidth: 24)
+                                    } else {
+                                        Label("Touch ID", systemImage: "touchid")
+                                            .frame(minWidth: 74)
+                                    }
                                 }
                                 .buttonStyle(.bordered)
                                 .controlSize(isCompact ? .regular : .large)
@@ -88,7 +93,7 @@ struct LockOverlayView: View {
                             Button("Quit App", action: onQuit)
                                 .buttonStyle(.bordered)
                                 .controlSize(isCompact ? .small : .large)
-                                .tint(.white.opacity(0.2))
+                                .tint(.gray)
 
                             Button("Unlock", action: submit)
                                 .buttonStyle(.borderedProminent)
@@ -96,21 +101,24 @@ struct LockOverlayView: View {
                                 .keyboardShortcut(.defaultAction)
                         }
                     }
-                    .frame(maxWidth: isCompact ? 280 : 360)
+                    .frame(maxWidth: isCompact ? 300 : 380)
                 }
             }
-            .padding(.horizontal, isCompact ? 18 : 34)
-            .padding(.vertical, isCompact ? 14 : 26)
-            .background(
-                RoundedRectangle(cornerRadius: isCompact ? 8 : 12, style: .continuous)
-                    .fill(Color(red: 0.07, green: 0.07, blue: 0.09).opacity(0.94))
-            )
+            .padding(.horizontal, isCompact ? 16 : 30)
+            .padding(.vertical, isCompact ? 14 : 24)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(Color.accentColor.opacity(0.75))
+                    .frame(height: 2)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
             .overlay(
-                RoundedRectangle(cornerRadius: isCompact ? 8 : 12, style: .continuous)
-                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.white.opacity(0.12), lineWidth: 1)
             )
-            .shadow(color: .black.opacity(0.32), radius: isCompact ? 12 : 24, x: 0, y: isCompact ? 6 : 14)
-            .padding(isCompact ? 8 : 24)
+            .shadow(color: .black.opacity(0.38), radius: isCompact ? 12 : 22, x: 0, y: isCompact ? 6 : 12)
+            .padding(isCompact ? 10 : 24)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
