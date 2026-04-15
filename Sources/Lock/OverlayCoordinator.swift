@@ -181,9 +181,12 @@ final class OverlayCoordinator: NSObject, ObservableObject {
     }
 
     private func shieldTargets(for app: NSRunningApplication, previousTargets: [ShieldTarget]) -> [ShieldTarget] {
-        let snapshots = AXWindowBridge.snapshots(for: app)
+        let snapshots = CGWindowBridge.snapshots(for: app)
+            .ifEmpty { AXWindowBridge.snapshots(for: app) }
         let visibleFrames = snapshots.map(\.frame).filter { $0.width > 24 && $0.height > 24 }
-        let preferredFrame = AXWindowBridge.primarySnapshot(for: app)?.frame ?? visibleFrames.first
+        let preferredFrame = CGWindowBridge.primarySnapshot(for: app)?.frame
+            ?? AXWindowBridge.primarySnapshot(for: app)?.frame
+            ?? visibleFrames.first
         var targets = visibleFrames.enumerated().map { index, frame in
             ShieldTarget(id: "window-\(index)", frame: frame.integral)
         }
@@ -405,6 +408,12 @@ private struct AXWindowSnapshot {
     let frame: NSRect
 }
 
+private extension Array {
+    func ifEmpty(_ fallback: () -> Self) -> Self {
+        isEmpty ? fallback() : self
+    }
+}
+
 final class LockOverlayPanel: NSWindow {
     var lockedProcessID: pid_t = 0
     var shieldID = ""
@@ -539,5 +548,91 @@ fileprivate enum AXWindowBridge {
         }
 
         return CFBooleanGetValue((value as! CFBoolean))
+    }
+}
+
+fileprivate enum CGWindowBridge {
+    static func primarySnapshot(for app: NSRunningApplication) -> AXWindowSnapshot? {
+        snapshots(for: app).max { lhs, rhs in
+            lhs.frame.width * lhs.frame.height < rhs.frame.width * rhs.frame.height
+        }
+    }
+
+    static func snapshots(for app: NSRunningApplication) -> [AXWindowSnapshot] {
+        guard let windowInfo = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+            return []
+        }
+
+        let snapshots = windowInfo.compactMap { info -> AXWindowSnapshot? in
+            guard let ownerPID = info[kCGWindowOwnerPID as String] as? pid_t,
+                  ownerPID == app.processIdentifier,
+                  let layer = info[kCGWindowLayer as String] as? Int,
+                  layer == 0,
+                  let alpha = info[kCGWindowAlpha as String] as? Double,
+                  alpha > 0.01,
+                  let bounds = info[kCGWindowBounds as String] as? [String: Any],
+                  let frame = appKitFrame(from: bounds),
+                  frame.width > 80,
+                  frame.height > 80 else {
+                return nil
+            }
+
+            return AXWindowSnapshot(frame: frame)
+        }
+
+        return snapshots.sorted { lhs, rhs in
+            lhs.frame.width * lhs.frame.height > rhs.frame.width * rhs.frame.height
+        }
+    }
+
+    private static func appKitFrame(from bounds: [String: Any]) -> NSRect? {
+        guard let x = number(bounds["X"]),
+              let y = number(bounds["Y"]),
+              let width = number(bounds["Width"]),
+              let height = number(bounds["Height"]),
+              width > 0,
+              height > 0 else {
+            return nil
+        }
+
+        let quartzFrame = NSRect(x: x, y: y, width: width, height: height)
+        let converted = convertQuartzFrameToAppKit(quartzFrame)
+        return converted.integral
+    }
+
+    private static func number(_ value: Any?) -> CGFloat? {
+        switch value {
+        case let number as NSNumber:
+            CGFloat(truncating: number)
+        case let value as CGFloat:
+            value
+        case let value as Double:
+            CGFloat(value)
+        case let value as Int:
+            CGFloat(value)
+        default:
+            nil
+        }
+    }
+
+    private static func convertQuartzFrameToAppKit(_ frame: NSRect) -> NSRect {
+        let screens = NSScreen.screens
+        guard !screens.isEmpty else {
+            return frame
+        }
+
+        let desktopMaxY = screens.map(\.frame.maxY).max() ?? 0
+        let converted = NSRect(
+            x: frame.minX,
+            y: desktopMaxY - frame.maxY,
+            width: frame.width,
+            height: frame.height
+        )
+
+        if screens.contains(where: { $0.frame.intersects(converted) || $0.frame.contains(NSPoint(x: converted.midX, y: converted.midY)) }) {
+            return converted
+        }
+
+        return frame
     }
 }
