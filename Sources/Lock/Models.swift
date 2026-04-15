@@ -19,4 +19,12 @@ struct InstalledApp: Hashable, Identifiable {
 struct PasswordRecord: Codable {
     let salt: Data
     let digest: Data
+    let algorithm: String?
+    let iterations: Int?
+}
+
+struct RunningAppIdentity: Hashable {
+    let processID: pid_t
+    let bundleIdentifier: String
+    let launchDate: Date?
 }

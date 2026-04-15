@@ -8,9 +8,11 @@ final class OverlayCoordinator: NSObject, ObservableObject {
     private let lockStore: LockStore
     private let activityLog: ActivityLogStore
 
-    private var lockWindows: [pid_t: LockOverlayPanel] = [:]
+    private var lockWindows: [pid_t: [String: LockOverlayPanel]] = [:]
     private var lockedSessions: [pid_t: LockedSession] = [:]
     private var completions: [pid_t: (Bool) -> Void] = [:]
+    private var syncTimer: Timer?
+    private var activeProcessID: pid_t?
 
     init(lockStore: LockStore, activityLog: ActivityLogStore) {
         self.lockStore = lockStore
@@ -21,35 +23,60 @@ final class OverlayCoordinator: NSObject, ObservableObject {
         lockedSessions[processID] != nil
     }
 
-    func presentLock(for app: NSRunningApplication, completion: @escaping (Bool) -> Void) {
+    func presentLock(for app: NSRunningApplication, identity: RunningAppIdentity, completion: @escaping (Bool) -> Void) {
         let processID = app.processIdentifier
 
         if isPresentingLock(for: processID) {
-            bringLockWindowToFront(processID: processID)
+            reassertLock(for: app, identity: identity, makeKey: true)
             return
         }
 
-        let initialFrame = overlayFrame(for: app)
-        lockedSessions[processID] = LockedSession(app: app, lastKnownFrame: initialFrame)
+        let initialTargets = shieldTargets(for: app, previousTargets: [])
+        let session = LockedSession(
+            id: UUID(),
+            app: app,
+            identity: identity,
+            appName: app.localizedName ?? "Protected App",
+            appIcon: icon(for: app),
+            lastTargets: initialTargets
+        )
+        lockedSessions[processID] = session
         completions[processID] = completion
         app.hide()
-
-        let window = makeLockWindow(for: app, frame: initialFrame)
-        window.lockedProcessID = processID
-        lockWindows[processID] = window
-        bringLockWindowToFront(processID: processID)
+        syncShieldWindows(processID: processID, makeKey: true)
+        updateSyncTimer()
     }
 
-    func reassertLock(for app: NSRunningApplication) {
+    func reassertLock(for app: NSRunningApplication, identity: RunningAppIdentity, makeKey: Bool = false) {
         let processID = app.processIdentifier
 
-        guard isPresentingLock(for: processID) else {
+        guard let session = lockedSessions[processID] else {
             return
         }
 
-        updateStoredFrameIfAvailable(for: processID, app: app)
+        guard session.identity == identity else {
+            dismiss(processID: processID, unlocked: false)
+            return
+        }
+
+        refreshStoredTargets(processID: processID)
         app.hide()
-        bringLockWindowToFront(processID: processID)
+        syncShieldWindows(processID: processID, makeKey: makeKey)
+    }
+
+    func activeApplicationChanged(to processID: pid_t) {
+        activeProcessID = processID
+
+        for lockedProcessID in Array(lockedSessions.keys) {
+            if lockedProcessID == processID {
+                refreshStoredTargets(processID: lockedProcessID)
+                lockedSessions[lockedProcessID]?.app.hide()
+                syncShieldWindows(processID: lockedProcessID, makeKey: true)
+            } else {
+                lockedSessions[lockedProcessID]?.app.hide()
+                orderOutLockWindows(processID: lockedProcessID)
+            }
+        }
     }
 
     func dismissIfMatching(processID: pid_t) {
@@ -60,133 +87,217 @@ final class OverlayCoordinator: NSObject, ObservableObject {
         dismiss(processID: processID, unlocked: false)
     }
 
-    private func makeLockWindow(for app: NSRunningApplication, frame: NSRect) -> LockOverlayPanel {
+    private func syncShieldWindows(processID: pid_t, makeKey: Bool) {
+        guard let session = lockedSessions[processID] else {
+            return
+        }
+
+        let targets = session.lastTargets
+        let targetIDs = Set(targets.map(\.id))
+        let interactiveID = targets.first?.id
+        var windows = lockWindows[processID] ?? [:]
+
+        for (id, window) in windows where !targetIDs.contains(id) {
+            window.orderOut(nil)
+            window.close()
+            windows.removeValue(forKey: id)
+        }
+
+        for target in targets {
+            let isInteractive = target.id == interactiveID
+
+            if let window = windows[target.id] {
+                window.setFrame(target.frame, display: true, animate: false)
+                if window.isInteractiveShield != isInteractive {
+                    configure(window: window, session: session, isInteractive: isInteractive)
+                }
+            } else {
+                let window = makeLockWindow(for: session, target: target, isInteractive: isInteractive)
+                windows[target.id] = window
+            }
+        }
+
+        lockWindows[processID] = windows
+        if activeProcessID == nil || activeProcessID == processID || makeKey {
+            bringLockWindowsToFront(processID: processID, makeKey: makeKey)
+        } else {
+            orderOutLockWindows(processID: processID)
+        }
+    }
+
+    private func makeLockWindow(for session: LockedSession, target: ShieldTarget, isInteractive: Bool) -> LockOverlayPanel {
         let window = LockOverlayPanel(
-            contentRect: frame,
+            contentRect: target.frame,
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
+        window.lockedProcessID = session.identity.processID
+        window.shieldID = target.id
         window.level = .screenSaver
-        window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary, .transient, .ignoresCycle]
+        window.collectionBehavior = [.fullScreenAuxiliary, .transient, .ignoresCycle]
         window.isExcludedFromWindowsMenu = true
         window.isFloatingPanel = false
         window.hidesOnDeactivate = false
         window.isMovable = false
         window.isReleasedWhenClosed = false
-        window.isOpaque = false
+        window.isOpaque = true
         window.hasShadow = false
-        window.backgroundColor = .clear
+        window.backgroundColor = .black
         window.appearance = NSAppearance(named: .darkAqua)
+        configure(window: window, session: session, isInteractive: isInteractive)
+        return window
+    }
 
-        let processID = app.processIdentifier
+    private func configure(window: LockOverlayPanel, session: LockedSession, isInteractive: Bool) {
+        let processID = session.identity.processID
+        let sessionID = session.id
+        window.isInteractiveShield = isInteractive
         window.onCommandQuit = { [weak self] in
-            self?.quitLockedApp(processID: processID)
+            self?.quitLockedApp(processID: processID, sessionID: sessionID)
         }
 
         let rootView = LockOverlayView(
-            appName: app.localizedName ?? "Protected App",
-            appIcon: icon(for: app),
+            appName: session.appName,
+            appIcon: session.appIcon,
             touchIDAvailable: canUseBiometrics(),
+            showsControls: isInteractive,
             onUnlock: { [weak self] password in
-                self?.attemptUnlock(password: password, processID: processID) ?? false
+                self?.attemptUnlock(password: password, processID: processID, sessionID: sessionID) ?? false
             },
             onTouchID: { [weak self] in
-                self?.attemptBiometricUnlock(processID: processID)
+                self?.attemptBiometricUnlock(processID: processID, sessionID: sessionID)
             },
             onQuit: { [weak self] in
-                self?.quitLockedApp(processID: processID)
+                self?.quitLockedApp(processID: processID, sessionID: sessionID)
             }
         )
 
         window.contentView = NSHostingView(rootView: rootView)
-        return window
     }
 
-    private func overlayFrame(for app: NSRunningApplication) -> NSRect {
-        if let snapshot = AXWindowBridge.snapshot(for: app) {
-            return snapshot.frame.integral
-        }
-
-        let fallbackFrame = primaryScreenFrame()
-        return fallbackFrame.integral
-    }
-
-    private func primaryScreenFrame() -> NSRect {
-        NSScreen.main?.frame
-            ?? NSScreen.screens.first?.frame
-            ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-    }
-
-    private func syncLockWindowFrame(processID: pid_t) {
-        guard let lockWindow = lockWindows[processID],
-              let session = lockedSessions[processID] else {
+    private func refreshStoredTargets(processID: pid_t) {
+        guard let session = lockedSessions[processID] else {
             return
         }
 
-        let frame = currentOverlayFrame(processID: processID, app: session.app)
-        lockWindow.setFrame(frame, display: true, animate: false)
+        let updatedTargets = shieldTargets(for: session.app, previousTargets: session.lastTargets)
+        lockedSessions[processID]?.lastTargets = updatedTargets
     }
 
-    private func currentOverlayFrame(processID: pid_t, app: NSRunningApplication) -> NSRect {
-        if let snapshot = AXWindowBridge.snapshot(for: app) {
-            let frame = snapshot.frame.integral
-            if var session = lockedSessions[processID] {
-                session.lastKnownFrame = frame
-                lockedSessions[processID] = session
+    private func shieldTargets(for app: NSRunningApplication, previousTargets: [ShieldTarget]) -> [ShieldTarget] {
+        let snapshots = AXWindowBridge.snapshots(for: app)
+        let visibleFrames = snapshots.map(\.frame).filter { $0.width > 24 && $0.height > 24 }
+        let preferredFrame = AXWindowBridge.primarySnapshot(for: app)?.frame ?? visibleFrames.first
+        var targets = visibleFrames.enumerated().map { index, frame in
+            ShieldTarget(id: "window-\(index)", frame: frame.integral)
+        }
+
+        if targets.isEmpty, !previousTargets.isEmpty {
+            return previousTargets
+        }
+
+        if targets.isEmpty {
+            let screen = screen(containing: preferredFrame) ?? NSScreen.main ?? NSScreen.screens.first
+            if let screen {
+                let size = NSSize(width: min(screen.visibleFrame.width * 0.42, 520), height: 340)
+                let frame = NSRect(
+                    x: screen.visibleFrame.midX - size.width / 2,
+                    y: screen.visibleFrame.midY - size.height / 2,
+                    width: size.width,
+                    height: size.height
+                )
+                targets.append(ShieldTarget(id: "fallback-auth", frame: frame.integral))
+            } else {
+                targets.append(ShieldTarget(id: "fallback-auth", frame: NSRect(x: 480, y: 280, width: 520, height: 340)))
             }
-            return frame
         }
 
-        return lockedSessions[processID]?.lastKnownFrame ?? primaryScreenFrame().integral
+        if let preferredFrame {
+            targets.sort { lhs, rhs in
+                if lhs.frame.intersects(preferredFrame) != rhs.frame.intersects(preferredFrame) {
+                    return lhs.frame.intersects(preferredFrame)
+                }
+                return lhs.frame.width * lhs.frame.height > rhs.frame.width * rhs.frame.height
+            }
+        } else {
+            targets.sort { lhs, rhs in
+                lhs.frame.width * lhs.frame.height > rhs.frame.width * rhs.frame.height
+            }
+        }
+
+        return targets
     }
 
-    private func updateStoredFrameIfAvailable(for processID: pid_t, app: NSRunningApplication) {
-        guard let snapshot = AXWindowBridge.snapshot(for: app),
-              var session = lockedSessions[processID] else {
+    private func screen(containing frame: NSRect?) -> NSScreen? {
+        guard let frame else {
+            return nil
+        }
+
+        let center = NSPoint(x: frame.midX, y: frame.midY)
+        return NSScreen.screens.first { NSMouseInRect(center, $0.frame, false) }
+            ?? NSScreen.screens.first { $0.frame.intersects(frame) }
+    }
+
+    private func bringLockWindowsToFront(processID: pid_t, makeKey: Bool) {
+        guard let windows = lockWindows[processID], !windows.isEmpty else {
             return
         }
 
-        session.lastKnownFrame = snapshot.frame.integral
-        lockedSessions[processID] = session
-    }
-
-    private func bringLockWindowToFront(processID: pid_t) {
-        guard let lockWindow = lockWindows[processID] else {
-            return
+        let orderedWindows = windows.values.sorted { lhs, rhs in
+            if lhs.isInteractiveShield != rhs.isInteractiveShield {
+                return lhs.isInteractiveShield
+            }
+            return lhs.shieldID < rhs.shieldID
         }
 
-        syncLockWindowFrame(processID: processID)
-        NSApp.activate(ignoringOtherApps: true)
-        lockWindow.orderFrontRegardless()
-        lockWindow.makeKeyAndOrderFront(nil)
+        for window in orderedWindows {
+            window.orderFrontRegardless()
+        }
+
+        if makeKey, let keyWindow = orderedWindows.first(where: \.isInteractiveShield) {
+            NSApp.activate(ignoringOtherApps: true)
+            keyWindow.makeKeyAndOrderFront(nil)
+        }
     }
 
-    private func attemptUnlock(password: String, processID: pid_t) -> Bool {
-        guard lockStore.verify(password: password) else {
+    private func orderOutLockWindows(processID: pid_t) {
+        lockWindows[processID]?.values.forEach { window in
+            window.orderOut(nil)
+        }
+    }
+
+    private func attemptUnlock(password: String, processID: pid_t, sessionID: UUID) -> Bool {
+        guard lockedSessions[processID]?.id == sessionID,
+              lockStore.verify(password: password) else {
             return false
         }
 
-        let appName = lockedSessions[processID]?.app.localizedName ?? "Protected app"
+        let appName = lockedSessions[processID]?.appName ?? "Protected app"
         dismiss(processID: processID, unlocked: true)
         activityLog.record("Unlocked App", detail: appName)
         return true
     }
 
-    private func attemptBiometricUnlock(processID: pid_t) {
+    private func attemptBiometricUnlock(processID: pid_t, sessionID: UUID) {
         let context = LAContext()
         var error: NSError?
+
+        guard lockedSessions[processID]?.id == sessionID else {
+            return
+        }
 
         guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else {
             activityLog.record("Touch ID Unavailable", detail: error?.localizedDescription ?? "Biometric authentication is not available.")
             return
         }
 
-        let appName = lockedSessions[processID]?.app.localizedName ?? "this app"
+        let appName = lockedSessions[processID]?.appName ?? "this app"
 
         context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: "Unlock \(appName)") { [weak self] success, evaluationError in
             DispatchQueue.main.async {
-                guard let self else {
+                guard let self,
+                      self.lockedSessions[processID]?.id == sessionID else {
                     return
                 }
 
@@ -200,19 +311,25 @@ final class OverlayCoordinator: NSObject, ObservableObject {
         }
     }
 
-    private func quitLockedApp(processID: pid_t) {
-        activityLog.record("Quit Locked App", detail: lockedSessions[processID]?.app.localizedName ?? "Protected app")
+    private func quitLockedApp(processID: pid_t, sessionID: UUID) {
+        guard lockedSessions[processID]?.id == sessionID else {
+            return
+        }
+
+        activityLog.record("Quit Locked App", detail: lockedSessions[processID]?.appName ?? "Protected app")
         lockedSessions[processID]?.app.terminate()
         dismiss(processID: processID, unlocked: false)
     }
 
     private func dismiss(processID: pid_t, unlocked: Bool) {
         let session = lockedSessions.removeValue(forKey: processID)
-        let lockWindow = lockWindows.removeValue(forKey: processID)
+        let windows = lockWindows.removeValue(forKey: processID)
         let completion = completions.removeValue(forKey: processID)
 
-        lockWindow?.orderOut(nil)
-        lockWindow?.close()
+        windows?.values.forEach { window in
+            window.orderOut(nil)
+            window.close()
+        }
 
         if unlocked, let session {
             session.app.unhide()
@@ -220,6 +337,39 @@ final class OverlayCoordinator: NSObject, ObservableObject {
         }
 
         completion?(unlocked)
+        updateSyncTimer()
+    }
+
+    private func updateSyncTimer() {
+        guard !lockedSessions.isEmpty else {
+            syncTimer?.invalidate()
+            syncTimer = nil
+            return
+        }
+
+        guard syncTimer == nil else {
+            return
+        }
+
+        syncTimer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.syncLockedSessions()
+            }
+        }
+    }
+
+    private func syncLockedSessions() {
+        for processID in Array(lockedSessions.keys) {
+            guard let session = lockedSessions[processID],
+                  !session.app.isTerminated else {
+                dismiss(processID: processID, unlocked: false)
+                continue
+            }
+
+            refreshStoredTargets(processID: processID)
+            session.app.hide()
+            syncShieldWindows(processID: processID, makeKey: false)
+        }
     }
 
     private func icon(for app: NSRunningApplication) -> NSImage {
@@ -243,8 +393,17 @@ final class OverlayCoordinator: NSObject, ObservableObject {
 }
 
 private struct LockedSession {
+    let id: UUID
     let app: NSRunningApplication
-    var lastKnownFrame: NSRect
+    let identity: RunningAppIdentity
+    let appName: String
+    let appIcon: NSImage
+    var lastTargets: [ShieldTarget]
+}
+
+private struct ShieldTarget {
+    let id: String
+    let frame: NSRect
 }
 
 private struct AXWindowSnapshot {
@@ -253,9 +412,11 @@ private struct AXWindowSnapshot {
 
 final class LockOverlayPanel: NSPanel {
     var lockedProcessID: pid_t = 0
+    var shieldID = ""
+    var isInteractiveShield = false
     var onCommandQuit: (() -> Void)?
 
-    override var canBecomeKey: Bool { true }
+    override var canBecomeKey: Bool { isInteractiveShield }
     override var canBecomeMain: Bool { false }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
@@ -275,13 +436,32 @@ final class LockOverlayPanel: NSPanel {
 }
 
 fileprivate enum AXWindowBridge {
-    static func snapshot(for app: NSRunningApplication) -> AXWindowSnapshot? {
+    static func primarySnapshot(for app: NSRunningApplication) -> AXWindowSnapshot? {
         guard let window = primaryWindow(for: app),
               let frame = frame(for: window) else {
             return nil
         }
 
         return AXWindowSnapshot(frame: frame)
+    }
+
+    static func snapshots(for app: NSRunningApplication) -> [AXWindowSnapshot] {
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        guard let windows = arrayValue(of: kAXWindowsAttribute as CFString, on: appElement) else {
+            return primarySnapshot(for: app).map { [$0] } ?? []
+        }
+
+        return windows.compactMap { window in
+            if boolValue(of: kAXMinimizedAttribute as CFString, on: window) == true {
+                return nil
+            }
+
+            guard let frame = frame(for: window) else {
+                return nil
+            }
+
+            return AXWindowSnapshot(frame: frame)
+        }
     }
 
     private static func primaryWindow(for app: NSRunningApplication) -> AXUIElement? {
@@ -352,5 +532,17 @@ fileprivate enum AXWindowBridge {
         }
 
         return (value as! AXValue)
+    }
+
+    private static func boolValue(of attribute: CFString, on element: AXUIElement) -> Bool? {
+        var value: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(element, attribute, &value)
+        guard result == .success,
+              let value,
+              CFGetTypeID(value) == CFBooleanGetTypeID() else {
+            return nil
+        }
+
+        return CFBooleanGetValue((value as! CFBoolean))
     }
 }

@@ -5,6 +5,7 @@ struct LockOverlayView: View {
     let appName: String
     let appIcon: NSImage
     let touchIDAvailable: Bool
+    let showsControls: Bool
     let onUnlock: (String) -> Bool
     let onTouchID: () -> Void
     let onQuit: () -> Void
@@ -56,43 +57,45 @@ struct LockOverlayView: View {
                     }
                 }
 
-                VStack(spacing: 14) {
-                    HStack(spacing: 10) {
-                        SecureField("Enter password", text: $password)
-                            .textFieldStyle(.roundedBorder)
-                            .controlSize(.large)
-                            .focused($passwordFocused)
-                            .onSubmit(submit)
+                if showsControls {
+                    VStack(spacing: 14) {
+                        HStack(spacing: 10) {
+                            SecureField("Enter password", text: $password)
+                                .textFieldStyle(.roundedBorder)
+                                .controlSize(.large)
+                                .focused($passwordFocused)
+                                .onSubmit(submit)
 
-                        if touchIDAvailable {
-                            Button(action: onTouchID) {
-                                Image(systemName: "touchid")
-                                    .frame(width: 18, height: 18)
+                            if touchIDAvailable {
+                                Button(action: onTouchID) {
+                                    Image(systemName: "touchid")
+                                        .frame(width: 18, height: 18)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.large)
                             }
-                            .buttonStyle(.bordered)
-                            .controlSize(.large)
+                        }
+
+                        if !errorMessage.isEmpty {
+                            Text(errorMessage)
+                                .font(.callout.weight(.semibold))
+                                .foregroundStyle(Color(red: 1.0, green: 0.42, blue: 0.48))
+                        }
+
+                        HStack(spacing: 10) {
+                            Button("Quit App", action: onQuit)
+                                .buttonStyle(.bordered)
+                                .controlSize(.large)
+                                .tint(.white.opacity(0.2))
+
+                            Button("Unlock", action: submit)
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.large)
+                                .keyboardShortcut(.defaultAction)
                         }
                     }
-
-                    if !errorMessage.isEmpty {
-                        Text(errorMessage)
-                            .font(.callout.weight(.semibold))
-                            .foregroundStyle(Color(red: 1.0, green: 0.42, blue: 0.48))
-                    }
-
-                    HStack(spacing: 10) {
-                        Button("Quit App", action: onQuit)
-                            .buttonStyle(.bordered)
-                            .controlSize(.large)
-                            .tint(.white.opacity(0.2))
-
-                        Button("Unlock", action: submit)
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.large)
-                            .keyboardShortcut(.defaultAction)
-                    }
+                    .frame(maxWidth: 360)
                 }
-                .frame(maxWidth: 360)
             }
             .padding(.horizontal, 36)
             .padding(.vertical, 28)
@@ -109,8 +112,10 @@ struct LockOverlayView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                passwordFocused = true
+            if showsControls {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    passwordFocused = true
+                }
             }
         }
     }

@@ -8,6 +8,8 @@ final class LockStore: ObservableObject {
 
     private let defaultsKey = "protected-apps"
     private let passwordAccount = "locker-password-record"
+    private let currentPasswordAlgorithm = "PBKDF2-HMAC-SHA256"
+    private let currentPasswordIterations = 120_000
     private let defaults = UserDefaults.standard
     private let keychain = KeychainManager(service: "com.zohaib.lock.password")
     private let activityLog: ActivityLogStore
@@ -51,8 +53,13 @@ final class LockStore: ObservableObject {
 
     func updatePassword(_ password: String) throws {
         let salt = try randomSalt()
-        let digest = digest(for: password, salt: salt)
-        let record = PasswordRecord(salt: salt, digest: digest)
+        let digest = digest(for: password, salt: salt, algorithm: currentPasswordAlgorithm, iterations: currentPasswordIterations)
+        let record = PasswordRecord(
+            salt: salt,
+            digest: digest,
+            algorithm: currentPasswordAlgorithm,
+            iterations: currentPasswordIterations
+        )
         let encoded = try JSONEncoder().encode(record)
         try keychain.save(data: encoded, account: passwordAccount)
         hasPassword = true
@@ -64,7 +71,13 @@ final class LockStore: ObservableObject {
             return false
         }
 
-        return digest(for: password, salt: record.salt) == record.digest
+        let candidate = digest(
+            for: password,
+            salt: record.salt,
+            algorithm: record.algorithm,
+            iterations: record.iterations
+        )
+        return constantTimeEqual(candidate, record.digest)
     }
 
     private func loadProtectedApps() {
@@ -98,8 +111,18 @@ final class LockStore: ObservableObject {
         return decoded
     }
 
-    private func digest(for password: String, salt: Data) -> Data {
+    private func digest(for password: String, salt: Data, algorithm: String?, iterations: Int?) -> Data {
         let passwordData = Data(password.utf8)
+
+        if algorithm == currentPasswordAlgorithm {
+            return pbkdf2SHA256(
+                password: passwordData,
+                salt: salt,
+                iterations: max(iterations ?? currentPasswordIterations, 1),
+                outputByteCount: 32
+            )
+        }
+
         let hash = SHA256.hash(data: salt + passwordData)
         return Data(hash)
     }
@@ -113,5 +136,47 @@ final class LockStore: ObservableObject {
         }
 
         return Data(bytes)
+    }
+
+    private func pbkdf2SHA256(password: Data, salt: Data, iterations: Int, outputByteCount: Int) -> Data {
+        let key = SymmetricKey(data: password)
+        let hmacLength = SHA256.byteCount
+        let blockCount = Int(ceil(Double(outputByteCount) / Double(hmacLength)))
+        var derived = Data()
+
+        for blockIndex in 1...blockCount {
+            var blockSalt = salt
+            var counter = UInt32(blockIndex).bigEndian
+            withUnsafeBytes(of: &counter) { blockSalt.append(contentsOf: $0) }
+
+            var u = Data(HMAC<SHA256>.authenticationCode(for: blockSalt, using: key))
+            var output = u
+
+            if iterations > 1 {
+                for _ in 2...iterations {
+                    u = Data(HMAC<SHA256>.authenticationCode(for: u, using: key))
+                    for index in output.indices {
+                        output[index] ^= u[index]
+                    }
+                }
+            }
+
+            derived.append(output)
+        }
+
+        return Data(derived.prefix(outputByteCount))
+    }
+
+    private func constantTimeEqual(_ lhs: Data, _ rhs: Data) -> Bool {
+        guard lhs.count == rhs.count else {
+            return false
+        }
+
+        var difference: UInt8 = 0
+        for index in lhs.indices {
+            difference |= lhs[index] ^ rhs[index]
+        }
+
+        return difference == 0
     }
 }
