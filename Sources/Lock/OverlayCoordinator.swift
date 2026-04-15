@@ -42,6 +42,8 @@ final class OverlayCoordinator: NSObject, ObservableObject {
         )
         lockedSessions[processID] = session
         completions[processID] = completion
+        activeProcessID = processID
+        app.hide()
         syncShieldWindows(processID: processID, makeKey: true)
         updateSyncTimer()
     }
@@ -59,6 +61,10 @@ final class OverlayCoordinator: NSObject, ObservableObject {
         }
 
         refreshStoredTargets(processID: processID)
+        if makeKey {
+            activeProcessID = processID
+        }
+        app.hide()
         syncShieldWindows(processID: processID, makeKey: makeKey)
     }
 
@@ -68,8 +74,10 @@ final class OverlayCoordinator: NSObject, ObservableObject {
         for lockedProcessID in Array(lockedSessions.keys) {
             if lockedProcessID == processID {
                 refreshStoredTargets(processID: lockedProcessID)
+                lockedSessions[lockedProcessID]?.app.hide()
                 syncShieldWindows(processID: lockedProcessID, makeKey: true)
             } else {
+                lockedSessions[lockedProcessID]?.app.hide()
                 hideLockWindows(processID: lockedProcessID)
             }
         }
@@ -332,6 +340,7 @@ final class OverlayCoordinator: NSObject, ObservableObject {
         }
 
         if unlocked, let session {
+            session.app.unhide()
             session.app.activate(options: [.activateAllWindows])
         }
 
@@ -366,6 +375,7 @@ final class OverlayCoordinator: NSObject, ObservableObject {
             }
 
             refreshStoredTargets(processID: processID)
+            session.app.hide()
             syncShieldWindows(processID: processID, makeKey: false)
         }
     }

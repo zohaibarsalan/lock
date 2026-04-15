@@ -10,7 +10,7 @@
 
 `Lock` is a native macOS menu bar app that lets you protect selected apps with your own password.
 
-When a protected app launches or becomes active, `Lock` captures that app's visible window bounds and places a lock window at the same boundary. The app stays locked until it is unlocked or quit from the lock screen. If you switch to another app, the lock window is removed until you return to the protected app.
+When a protected app launches or becomes active, `Lock` captures that app's visible window bounds, hides the protected app, and places a lock window at the same boundary. The app stays locked until it is unlocked or quit from the lock screen. If you switch to another app, the protected app stays hidden and the lock window is removed until you return to it.
 
 ## What It Does
 
@@ -98,10 +98,10 @@ At a high level:
 
 1. `Lock` watches running applications.
 2. When a protected app opens or becomes active, `Lock` captures that app's window frame.
-3. `Lock` records the protected app's visible window bounds.
+3. `Lock` records the protected app's visible window bounds and hides the protected app.
 4. `Lock` creates one or more lock windows at the protected app's last known window bounds.
 5. One shield becomes interactive and asks for password or Touch ID when the protected app is active.
-6. On successful unlock, the shields are removed and the app is brought forward.
+6. On successful unlock, the shields are removed and the app is unhidden and brought forward.
 
 This is implemented with:
 
