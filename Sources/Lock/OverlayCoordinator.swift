@@ -12,6 +12,8 @@ final class OverlayCoordinator: NSObject, ObservableObject {
     private var lockedSessions: [pid_t: LockedSession] = [:]
     private var completions: [pid_t: (Bool) -> Void] = [:]
     private let lockWindowCollectionBehavior: NSWindow.CollectionBehavior = [.managed, .fullScreenAuxiliary]
+    private let preferredLockContentSize = NSSize(width: 420, height: 260)
+    private let minimumLockContentSize = NSSize(width: 400, height: 240)
 
     init(lockStore: LockStore, activityLog: ActivityLogStore) {
         self.lockStore = lockStore
@@ -73,7 +75,7 @@ final class OverlayCoordinator: NSObject, ObservableObject {
         let appName = app.localizedName ?? "Protected App"
         let window = LockWindow(
             contentRect: frame,
-            styleMask: [.titled, .closable, .miniaturizable],
+            styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -87,9 +89,12 @@ final class OverlayCoordinator: NSObject, ObservableObject {
         window.isOpaque = true
         window.hasShadow = true
         window.backgroundColor = .windowBackgroundColor
-        window.appearance = NSAppearance(named: .aqua)
-        window.titlebarAppearsTransparent = false
+        window.appearance = nil
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
         window.standardWindowButton(.zoomButton)?.isHidden = true
+        window.setContentSize(preferredLockContentSize)
+        window.minSize = minimumLockContentSize
 
         let processID = app.processIdentifier
         window.onCommandQuit = { [weak self] in
@@ -138,14 +143,15 @@ final class OverlayCoordinator: NSObject, ObservableObject {
     }
 
     private func compactPromptFrame(in container: NSRect) -> NSRect {
-        let width = min(max(container.width * 0.34, 360), min(460, container.width))
-        let height = min(max(container.height * 0.30, 260), min(340, container.height))
+        lockContentFrame(centeredIn: container)
+    }
 
-        return NSRect(
-            x: container.midX - width / 2,
-            y: container.midY - height / 2,
-            width: width,
-            height: height
+    private func lockContentFrame(centeredIn container: NSRect) -> NSRect {
+        NSRect(
+            x: container.midX - preferredLockContentSize.width / 2,
+            y: container.midY - preferredLockContentSize.height / 2,
+            width: preferredLockContentSize.width,
+            height: preferredLockContentSize.height
         ).integral
     }
 
@@ -184,7 +190,7 @@ final class OverlayCoordinator: NSObject, ObservableObject {
             return
         }
 
-        let contentFrame = currentOverlayFrame(processID: processID, app: session.app)
+        let contentFrame = lockContentFrame(centeredIn: currentOverlayFrame(processID: processID, app: session.app))
         lockWindow.setFrame(lockWindow.frameRect(forContentRect: contentFrame), display: true, animate: false)
     }
 
