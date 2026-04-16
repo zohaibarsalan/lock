@@ -8,10 +8,10 @@ final class OverlayCoordinator: NSObject, ObservableObject {
     private let lockStore: LockStore
     private let activityLog: ActivityLogStore
 
-    private var lockWindows: [pid_t: LockOverlayPanel] = [:]
+    private var lockWindows: [pid_t: LockWindow] = [:]
     private var lockedSessions: [pid_t: LockedSession] = [:]
     private var completions: [pid_t: (Bool) -> Void] = [:]
-    private let lockPanelCollectionBehavior: NSWindow.CollectionBehavior = [.fullScreenAuxiliary, .transient, .ignoresCycle]
+    private let lockWindowCollectionBehavior: NSWindow.CollectionBehavior = [.managed, .fullScreenAuxiliary]
 
     init(lockStore: LockStore, activityLog: ActivityLogStore) {
         self.lockStore = lockStore
@@ -29,6 +29,8 @@ final class OverlayCoordinator: NSObject, ObservableObject {
             reassertLock(for: app)
             return
         }
+
+        activateForLockPresentation()
 
         let initialFrame = overlayFrame(for: app)
         lockedSessions[processID] = LockedSession(app: app, lastKnownFrame: initialFrame)
@@ -67,32 +69,38 @@ final class OverlayCoordinator: NSObject, ObservableObject {
         dismiss(processID: processID, unlocked: false)
     }
 
-    private func makeLockWindow(for app: NSRunningApplication, frame: NSRect) -> LockOverlayPanel {
-        let window = LockOverlayPanel(
+    private func makeLockWindow(for app: NSRunningApplication, frame: NSRect) -> LockWindow {
+        let appName = app.localizedName ?? "Protected App"
+        let window = LockWindow(
             contentRect: frame,
-            styleMask: [.borderless],
+            styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
         )
-        window.level = .modalPanel
-        window.collectionBehavior = lockPanelCollectionBehavior
-        window.isExcludedFromWindowsMenu = true
-        window.isFloatingPanel = false
+        window.title = "\(appName) Locked"
+        window.level = .normal
+        window.collectionBehavior = lockWindowCollectionBehavior
+        window.isExcludedFromWindowsMenu = false
         window.hidesOnDeactivate = false
-        window.isMovable = false
+        window.isMovable = true
         window.isReleasedWhenClosed = false
-        window.isOpaque = false
-        window.hasShadow = false
-        window.backgroundColor = .clear
-        window.appearance = NSAppearance(named: .darkAqua)
+        window.isOpaque = true
+        window.hasShadow = true
+        window.backgroundColor = .windowBackgroundColor
+        window.appearance = NSAppearance(named: .aqua)
+        window.titlebarAppearsTransparent = false
+        window.standardWindowButton(.zoomButton)?.isHidden = true
 
         let processID = app.processIdentifier
         window.onCommandQuit = { [weak self] in
             self?.quitLockedApp(processID: processID)
         }
+        window.onClose = { [weak self] in
+            self?.quitLockedApp(processID: processID)
+        }
 
         let rootView = LockOverlayView(
-            appName: app.localizedName ?? "Protected App",
+            appName: appName,
             appIcon: icon(for: app),
             touchIDAvailable: canUseBiometrics(),
             onUnlock: { [weak self] password in
@@ -130,8 +138,8 @@ final class OverlayCoordinator: NSObject, ObservableObject {
     }
 
     private func compactPromptFrame(in container: NSRect) -> NSRect {
-        let width = min(max(container.width * 0.34, 320), min(460, container.width))
-        let height = min(max(container.height * 0.30, 240), min(340, container.height))
+        let width = min(max(container.width * 0.34, 360), min(460, container.width))
+        let height = min(max(container.height * 0.30, 260), min(340, container.height))
 
         return NSRect(
             x: container.midX - width / 2,
@@ -176,8 +184,8 @@ final class OverlayCoordinator: NSObject, ObservableObject {
             return
         }
 
-        let frame = currentOverlayFrame(processID: processID, app: session.app)
-        lockWindow.setFrame(frame, display: true, animate: false)
+        let contentFrame = currentOverlayFrame(processID: processID, app: session.app)
+        lockWindow.setFrame(lockWindow.frameRect(forContentRect: contentFrame), display: true, animate: false)
     }
 
     private func currentOverlayFrame(processID: pid_t, app: NSRunningApplication) -> NSRect {
@@ -225,9 +233,14 @@ final class OverlayCoordinator: NSObject, ObservableObject {
         }
 
         syncLockWindowFrame(processID: processID)
+        activateForLockPresentation()
         NSApp.activate(ignoringOtherApps: true)
         lockWindow.orderFrontRegardless()
         lockWindow.makeKeyAndOrderFront(nil)
+    }
+
+    private func activateForLockPresentation() {
+        NSApp.setActivationPolicy(.regular)
     }
 
     private func hideLockedApp(_ app: NSRunningApplication, processID: pid_t) {
@@ -309,7 +322,17 @@ final class OverlayCoordinator: NSObject, ObservableObject {
             session.app.activate(options: [.activateAllWindows])
         }
 
+        restoreAccessoryActivationIfPossible()
         completion?(unlocked)
+    }
+
+    private func restoreAccessoryActivationIfPossible() {
+        guard lockWindows.isEmpty,
+              !NSApp.windows.contains(where: { $0 is MainAppWindow && $0.isVisible }) else {
+            return
+        }
+
+        NSApp.setActivationPolicy(.accessory)
     }
 
     private func icon(for app: NSRunningApplication) -> NSImage {
@@ -435,12 +458,17 @@ fileprivate enum CGWindowBridge {
     }
 }
 
-final class LockOverlayPanel: NSPanel {
+final class LockWindow: NSWindow {
     var lockedProcessID: pid_t = 0
     var onCommandQuit: (() -> Void)?
+    var onClose: (() -> Void)?
 
     override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { false }
+    override var canBecomeMain: Bool { true }
+
+    override func performClose(_ sender: Any?) {
+        onClose?()
+    }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         guard event.type == .keyDown else {
@@ -451,6 +479,11 @@ final class LockOverlayPanel: NSPanel {
 
         if modifiers == [.command], event.charactersIgnoringModifiers == "q" {
             onCommandQuit?()
+            return true
+        }
+
+        if modifiers == [.command], event.charactersIgnoringModifiers == "w" {
+            onClose?()
             return true
         }
 
