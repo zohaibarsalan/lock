@@ -92,6 +92,18 @@ final class AppMonitor: ObservableObject {
             }
         )
 
+        observers.append(
+            notificationCenter.addObserver(
+                forName: NSWorkspace.activeSpaceDidChangeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.handleActiveSpaceChange()
+                }
+            }
+        )
+
         for app in workspace.runningApplications {
             evaluate(app, delay: 0)
         }
@@ -170,6 +182,14 @@ final class AppMonitor: ObservableObject {
         }
 
         evaluate(app, delay: 0)
+    }
+
+    private func handleActiveSpaceChange() {
+        overlayCoordinator.rehideLockedAppsForSpaceChange()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.evaluateFrontmostApplication()
+        }
     }
 
     private func evaluate(_ app: NSRunningApplication, delay: TimeInterval) {
