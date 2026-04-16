@@ -12,7 +12,6 @@ struct LockApp: App {
     @StateObject private var startupService: StartupService
     @StateObject private var activityLog: ActivityLogStore
     @StateObject private var mainWindowController: MainWindowController
-    @StateObject private var adminAuthService: AdminAuthService
 
     init() {
         let activityLog = ActivityLogStore()
@@ -23,15 +22,13 @@ struct LockApp: App {
         let navigation = AppNavigation()
         let permissionService = PermissionService(activityLog: activityLog)
         let startupService = StartupService(activityLog: activityLog)
-        let adminAuthService = AdminAuthService(activityLog: activityLog)
         let mainWindowController = MainWindowController(
             lockStore: store,
             discoveryService: discovery,
             navigation: navigation,
             permissionService: permissionService,
             startupService: startupService,
-            activityLog: activityLog,
-            adminAuthService: adminAuthService
+            activityLog: activityLog
         )
 
         _lockStore = StateObject(wrappedValue: store)
@@ -43,7 +40,6 @@ struct LockApp: App {
         _startupService = StateObject(wrappedValue: startupService)
         _activityLog = StateObject(wrappedValue: activityLog)
         _mainWindowController = StateObject(wrappedValue: mainWindowController)
-        _adminAuthService = StateObject(wrappedValue: adminAuthService)
     }
 
     var body: some Scene {
@@ -51,13 +47,6 @@ struct LockApp: App {
             Button("Show") {
                 mainWindowController.show(section: .apps)
             }
-
-            Divider()
-
-            Button(lockCurrentAppTitle) {
-                appMonitor.lockLastActiveApplication()
-            }
-            .disabled(!appMonitor.canLockLastActiveApplication)
 
             Divider()
 
@@ -77,32 +66,11 @@ struct LockApp: App {
             Divider()
 
             Button("Quit Lock") {
-                quitLock()
+                NSApplication.shared.terminate(nil)
             }
             .keyboardShortcut("q", modifiers: .command)
         }
         .menuBarExtraStyle(.menu)
-    }
-
-    private var lockCurrentAppTitle: String {
-        if let appName = appMonitor.lastActiveApplicationName {
-            "Lock \(appName)"
-        } else {
-            "Lock Current App"
-        }
-    }
-
-    private func quitLock() {
-        guard lockStore.hasPassword else {
-            NSApplication.shared.terminate(nil)
-            return
-        }
-
-        adminAuthService.authorize(reason: "Quit Lock") { success in
-            if success {
-                NSApplication.shared.terminate(nil)
-            }
-        }
     }
 }
 

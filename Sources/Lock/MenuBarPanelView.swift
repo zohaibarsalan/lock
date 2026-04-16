@@ -3,7 +3,6 @@ import SwiftUI
 struct MenuBarPanelView: View {
     @EnvironmentObject private var lockStore: LockStore
     @EnvironmentObject private var mainWindowController: MainWindowController
-    @EnvironmentObject private var adminAuthService: AdminAuthService
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -36,7 +35,7 @@ struct MenuBarPanelView: View {
             Divider()
 
             Button(role: .destructive, action: {
-                quitLock()
+                NSApplication.shared.terminate(nil)
             }) {
                 menuRow(title: "Quit", symbolName: "power")
             }
@@ -61,18 +60,5 @@ struct MenuBarPanelView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 9)
         .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-
-    private func quitLock() {
-        guard lockStore.hasPassword else {
-            NSApplication.shared.terminate(nil)
-            return
-        }
-
-        adminAuthService.authorize(reason: "Quit Lock") { success in
-            if success {
-                NSApplication.shared.terminate(nil)
-            }
-        }
     }
 }

@@ -5,7 +5,6 @@ struct LockOverlayView: View {
     let appName: String
     let appIcon: NSImage
     let touchIDAvailable: Bool
-    let showsControls: Bool
     let onUnlock: (String) -> Bool
     let onTouchID: () -> Void
     let onQuit: () -> Void
@@ -15,111 +14,104 @@ struct LockOverlayView: View {
     @FocusState private var passwordFocused: Bool
 
     var body: some View {
-        GeometryReader { proxy in
-            overlayContent(isCompact: proxy.size.width < 520 || proxy.size.height < 380)
-        }
-        .onAppear {
-            if showsControls {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                    passwordFocused = true
-                }
-            }
-        }
-    }
-
-    private func overlayContent(isCompact: Bool) -> some View {
         ZStack {
             Rectangle()
-                .fill(Color(red: 0.035, green: 0.037, blue: 0.043))
+                .fill(Color.black.opacity(0.58))
                 .ignoresSafeArea()
 
-            VStack(spacing: isCompact ? 12 : 18) {
-                VStack(spacing: isCompact ? 8 : 12) {
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.07),
+                            Color.clear,
+                            Color.black.opacity(0.18)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .ignoresSafeArea()
+
+            VStack(spacing: 26) {
+                VStack(spacing: 16) {
                     Image(nsImage: appIcon)
                         .resizable()
-                        .frame(width: isCompact ? 38 : 64, height: isCompact ? 38 : 64)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .frame(width: 78, height: 78)
+                        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
 
-                    VStack(spacing: isCompact ? 3 : 6) {
-                        Text("App Locked")
-                            .font(.system(size: isCompact ? 20 : 30, weight: .bold, design: .rounded))
+                    VStack(spacing: 10) {
+                        Text("Locked")
+                            .font(.system(size: 34, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
 
                         Text(appName)
-                            .font(.system(size: isCompact ? 12 : 16, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.72))
-                            .lineLimit(1)
+                            .font(.system(size: 18, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.88))
 
-                        if !isCompact {
-                            Text("Unlock with your password or Touch ID.")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.54))
-                                .multilineTextAlignment(.center)
-                        }
+                        Text("Enter your password to keep using this app.")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.64))
+                            .multilineTextAlignment(.center)
                     }
                 }
 
-                if showsControls {
-                    VStack(spacing: isCompact ? 8 : 12) {
-                        HStack(spacing: 10) {
-                            SecureField("Enter password", text: $password)
-                                .textFieldStyle(.roundedBorder)
-                                .controlSize(isCompact ? .regular : .large)
-                                .focused($passwordFocused)
-                                .onSubmit(submit)
+                VStack(spacing: 14) {
+                    HStack(spacing: 10) {
+                        SecureField("Enter password", text: $password)
+                            .textFieldStyle(.roundedBorder)
+                            .controlSize(.large)
+                            .focused($passwordFocused)
+                            .onSubmit(submit)
 
-                            if touchIDAvailable {
-                                Button(action: onTouchID) {
-                                    if isCompact {
-                                        Image(systemName: "touchid")
-                                            .frame(minWidth: 24)
-                                    } else {
-                                        Label("Touch ID", systemImage: "touchid")
-                                            .frame(minWidth: 74)
-                                    }
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(isCompact ? .regular : .large)
+                        if touchIDAvailable {
+                            Button(action: onTouchID) {
+                                Image(systemName: "touchid")
+                                    .frame(width: 18, height: 18)
                             }
-                        }
-
-                        if !errorMessage.isEmpty {
-                            Text(errorMessage)
-                                .font((isCompact ? Font.caption : Font.callout).weight(.semibold))
-                                .foregroundStyle(Color(red: 1.0, green: 0.42, blue: 0.48))
-                        }
-
-                        HStack(spacing: 10) {
-                            Button("Quit App", action: onQuit)
-                                .buttonStyle(.bordered)
-                                .controlSize(isCompact ? .small : .large)
-                                .tint(.gray)
-
-                            Button("Unlock", action: submit)
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(isCompact ? .small : .large)
-                                .keyboardShortcut(.defaultAction)
+                            .buttonStyle(.bordered)
+                            .controlSize(.large)
                         }
                     }
-                    .frame(maxWidth: isCompact ? 300 : 380)
+
+                    if !errorMessage.isEmpty {
+                        Text(errorMessage)
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(Color(red: 1.0, green: 0.42, blue: 0.48))
+                    }
+
+                    HStack(spacing: 10) {
+                        Button("Quit App", action: onQuit)
+                            .buttonStyle(.bordered)
+                            .controlSize(.large)
+                            .tint(.white.opacity(0.2))
+
+                        Button("Unlock", action: submit)
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                            .keyboardShortcut(.defaultAction)
+                    }
                 }
+                .frame(maxWidth: 360)
             }
-            .padding(.horizontal, isCompact ? 16 : 30)
-            .padding(.vertical, isCompact ? 14 : 24)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(alignment: .top) {
-                Rectangle()
-                    .fill(Color.accentColor.opacity(0.75))
-                    .frame(height: 2)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            }
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(Color.white.opacity(0.12), lineWidth: 1)
+            .padding(.horizontal, 36)
+            .padding(.vertical, 28)
+            .background(
+                RoundedRectangle(cornerRadius: 32, style: .continuous)
+                    .fill(Color(red: 0.10, green: 0.10, blue: 0.12).opacity(0.78))
             )
-            .shadow(color: .black.opacity(0.38), radius: isCompact ? 12 : 22, x: 0, y: isCompact ? 6 : 12)
-            .padding(isCompact ? 10 : 24)
+            .overlay(
+                RoundedRectangle(cornerRadius: 32, style: .continuous)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.28), radius: 28, x: 0, y: 18)
+            .padding(32)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                passwordFocused = true
+            }
         }
     }
 

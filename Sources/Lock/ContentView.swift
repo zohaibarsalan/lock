@@ -8,7 +8,6 @@ struct ContentView: View {
     @EnvironmentObject private var permissionService: PermissionService
     @EnvironmentObject private var startupService: StartupService
     @EnvironmentObject private var activityLog: ActivityLogStore
-    @EnvironmentObject private var adminAuthService: AdminAuthService
 
     @State private var searchText = ""
     @State private var password = ""
@@ -149,11 +148,7 @@ struct ContentView: View {
                                     isProtected: Binding(
                                         get: { lockStore.isProtected(app.bundleIdentifier) },
                                         set: { newValue in
-                                            adminAuthService.authorize(reason: "Change protected apps") { success in
-                                                if success {
-                                                    lockStore.setProtection(for: app, isProtected: newValue)
-                                                }
-                                            }
+                                            lockStore.setProtection(for: app, isProtected: newValue)
                                         }
                                     ),
                                     canProtect: lockStore.hasPassword
@@ -256,13 +251,7 @@ struct ContentView: View {
                 subtitle: "Best used from the packaged `.app` bundle so it starts detached from Terminal.",
                 isOn: Binding(
                     get: { startupService.isEnabled },
-                    set: { enabled in
-                        adminAuthService.authorize(reason: "Change Lock startup settings") { success in
-                            if success {
-                                startupService.setEnabled(enabled)
-                            }
-                        }
-                    }
+                    set: { startupService.setEnabled($0) }
                 )
             )
 
@@ -366,28 +355,15 @@ struct ContentView: View {
             return
         }
 
-        let newPassword = password
-        let updatePassword = {
-            do {
-                try lockStore.updatePassword(newPassword)
-                password = ""
-                confirmPassword = ""
-                passwordMessage = "Password updated."
-                passwordMessageIsError = false
-            } catch {
-                passwordMessage = "Could not save password."
-                passwordMessageIsError = true
-            }
-        }
-
-        if lockStore.hasPassword {
-            adminAuthService.authorize(reason: "Change Lock password") { success in
-                if success {
-                    updatePassword()
-                }
-            }
-        } else {
-            updatePassword()
+        do {
+            try lockStore.updatePassword(password)
+            password = ""
+            confirmPassword = ""
+            passwordMessage = "Password updated."
+            passwordMessageIsError = false
+        } catch {
+            passwordMessage = "Could not save password."
+            passwordMessageIsError = true
         }
     }
 

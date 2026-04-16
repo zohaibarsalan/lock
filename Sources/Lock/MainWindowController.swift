@@ -9,7 +9,6 @@ final class MainWindowController: NSObject, ObservableObject, NSWindowDelegate {
     private let permissionService: PermissionService
     private let startupService: StartupService
     private let activityLog: ActivityLogStore
-    private let adminAuthService: AdminAuthService
 
     private var window: MainAppWindow?
 
@@ -19,8 +18,7 @@ final class MainWindowController: NSObject, ObservableObject, NSWindowDelegate {
         navigation: AppNavigation,
         permissionService: PermissionService,
         startupService: StartupService,
-        activityLog: ActivityLogStore,
-        adminAuthService: AdminAuthService
+        activityLog: ActivityLogStore
     ) {
         self.lockStore = lockStore
         self.discoveryService = discoveryService
@@ -28,7 +26,6 @@ final class MainWindowController: NSObject, ObservableObject, NSWindowDelegate {
         self.permissionService = permissionService
         self.startupService = startupService
         self.activityLog = activityLog
-        self.adminAuthService = adminAuthService
     }
 
     func show(section: SidebarSection) {
@@ -51,7 +48,6 @@ final class MainWindowController: NSObject, ObservableObject, NSWindowDelegate {
             .environmentObject(permissionService)
             .environmentObject(startupService)
             .environmentObject(activityLog)
-            .environmentObject(adminAuthService)
 
         let window = MainAppWindow(
             contentRect: NSRect(x: 0, y: 0, width: 940, height: 640),
@@ -73,9 +69,6 @@ final class MainWindowController: NSObject, ObservableObject, NSWindowDelegate {
         window.isOpaque = false
         window.appearance = NSAppearance(named: .darkAqua)
         window.standardWindowButton(.zoomButton)?.isHidden = true
-        window.onCommandQuit = { [weak self] in
-            self?.quitLock()
-        }
         window.orderFrontRegardless()
         window.makeKeyAndOrderFront(nil)
 
@@ -91,24 +84,9 @@ final class MainWindowController: NSObject, ObservableObject, NSWindowDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
     }
-
-    private func quitLock() {
-        guard lockStore.hasPassword else {
-            NSApplication.shared.terminate(nil)
-            return
-        }
-
-        adminAuthService.authorize(reason: "Quit Lock") { success in
-            if success {
-                NSApplication.shared.terminate(nil)
-            }
-        }
-    }
 }
 
 final class MainAppWindow: NSWindow {
-    var onCommandQuit: (() -> Void)?
-
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         guard event.type == .keyDown else {
             return super.performKeyEquivalent(with: event)
@@ -122,7 +100,7 @@ final class MainAppWindow: NSWindow {
         }
 
         if modifiers == [.command], event.charactersIgnoringModifiers == "q" {
-            onCommandQuit?()
+            NSApplication.shared.terminate(nil)
             return true
         }
 
