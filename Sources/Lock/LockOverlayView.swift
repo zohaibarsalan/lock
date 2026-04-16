@@ -18,142 +18,115 @@ struct LockOverlayView: View {
       Color(nsColor: .windowBackgroundColor)
         .ignoresSafeArea()
 
-      VStack(spacing: 0) {
-        Spacer(minLength: 0)
+      VStack {
+        Spacer(minLength: 32)
 
-        VStack(spacing: 16) {
-          Image(nsImage: appIcon)
-            .resizable()
-            .interpolation(.high)
-            .frame(width: 48, height: 48)
-
-          Text(appName)
-            .font(.system(size: 18, weight: .semibold))
-            .foregroundStyle(.primary)
-            .lineLimit(1)
-
-          VStack(spacing: 6) {
-            passwordField
-
-            if !errorMessage.isEmpty {
-              Text(errorMessage)
-                .font(.system(size: 12))
-                .foregroundStyle(.red)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-          }
-
-          HStack(spacing: 10) {
-            if touchIDAvailable {
-              Button(action: onTouchID) {
-                Label("Touch ID", systemImage: "touchid")
-                  .frame(maxWidth: .infinity)
-              }
-              .buttonStyle(LockSecondaryButtonStyle())
-            }
-
-            Button("Unlock", action: submit)
-              .frame(maxWidth: .infinity)
-              .buttonStyle(LockPrimaryButtonStyle())
-              .keyboardShortcut(.defaultAction)
-          }
-
-          Button("Quit App", action: onQuit)
-            .buttonStyle(LockQuitButtonStyle())
-            .padding(.top, 2)
+        VStack(spacing: 22) {
+          header
+          formSection
+          actionSection
         }
         .frame(maxWidth: 340)
         .padding(.horizontal, 24)
-        .padding(.vertical, 20)
+        .padding(.vertical, 28)
 
-        Spacer(minLength: 0)
+        Spacer(minLength: 32)
       }
     }
     .onAppear {
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
         passwordFocused = true
       }
     }
   }
 
-  private var passwordField: some View {
-    SecureField("Enter password", text: $password)
-      .textFieldStyle(.plain)
-      .font(.system(size: 14, weight: .regular))
-      .focused($passwordFocused)
-      .onSubmit(submit)
-      .padding(.horizontal, 12)
-      .frame(height: 36)
-      .background(Color(nsColor: .controlBackgroundColor))
-      .overlay(
-        Rectangle()
-          .stroke(
-            passwordFocused
-              ? Color.accentColor
-              : Color(nsColor: .separatorColor),
-            lineWidth: passwordFocused ? 2 : 1
-          )
-      )
+  private var header: some View {
+    VStack(spacing: 8) {
+      Image(nsImage: appIcon)
+        .resizable()
+        .interpolation(.high)
+        .frame(width: 64, height: 64)
+
+      Text(appName)
+        .font(.system(size: 30, weight: .semibold))
+        .foregroundStyle(.primary)
+        .lineLimit(1)
+
+      Text("Unlock to continue")
+        .font(.system(size: 15))
+        .foregroundStyle(.secondary)
+    }
+    .frame(maxWidth: .infinity)
+  }
+
+  private var formSection: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text("Password")
+        .font(.system(size: 14, weight: .medium))
+        .foregroundStyle(.secondary)
+
+      SecureField("Enter your password", text: $password)
+        .textFieldStyle(.roundedBorder)
+        .controlSize(.large)
+        .font(.system(size: 15))
+        .focused($passwordFocused)
+        .onSubmit(submit)
+        .frame(maxWidth: .infinity)
+        .frame(height: 38)
+
+      if !errorMessage.isEmpty {
+        Text(errorMessage)
+          .font(.system(size: 12))
+          .foregroundStyle(.red)
+          .frame(maxWidth: .infinity, alignment: .leading)
+      }
+    }
+  }
+
+  private var actionSection: some View {
+    VStack(spacing: 14) {
+      HStack(spacing: 14) {
+        if touchIDAvailable {
+          Button(action: onTouchID) {
+            Label("Touch ID", systemImage: "touchid")
+              .frame(maxWidth: .infinity)
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.large)
+        }
+
+        Button(action: submit) {
+          Text("Unlock")
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+        .keyboardShortcut(.defaultAction)
+      }
+
+      Button("Quit App", action: onQuit)
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+    }
+    .frame(maxWidth: .infinity)
   }
 
   private func submit() {
-    guard !password.isEmpty else {
+    let trimmedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    guard !trimmedPassword.isEmpty else {
       errorMessage = "Enter the password first."
       passwordFocused = true
       return
     }
 
-    if onUnlock(password) {
+    if onUnlock(trimmedPassword) {
       errorMessage = ""
       password = ""
     } else {
       password = ""
-      errorMessage = "Wrong password."
+      errorMessage = "Incorrect password."
       passwordFocused = true
     }
-  }
-}
-
-private struct LockPrimaryButtonStyle: ButtonStyle {
-  func makeBody(configuration: Configuration) -> some View {
-    configuration.label
-      .font(.system(size: 13, weight: .semibold))
-      .foregroundStyle(.white)
-      .frame(height: 34)
-      .background(
-        Rectangle()
-          .fill(Color.accentColor.opacity(configuration.isPressed ? 0.82 : 1))
-      )
-      .contentShape(Rectangle())
-  }
-}
-
-private struct LockSecondaryButtonStyle: ButtonStyle {
-  func makeBody(configuration: Configuration) -> some View {
-    configuration.label
-      .font(.system(size: 13, weight: .semibold))
-      .foregroundStyle(.primary)
-      .frame(height: 34)
-      .background(
-        Rectangle()
-          .fill(Color(nsColor: .controlBackgroundColor))
-      )
-      .overlay(
-        Rectangle()
-          .stroke(
-            Color(nsColor: .separatorColor).opacity(configuration.isPressed ? 0.75 : 1),
-            lineWidth: 1
-          )
-      )
-      .contentShape(Rectangle())
-  }
-}
-
-private struct LockQuitButtonStyle: ButtonStyle {
-  func makeBody(configuration: Configuration) -> some View {
-    configuration.label
-      .font(.system(size: 12, weight: .medium))
-      .foregroundStyle(.secondary.opacity(configuration.isPressed ? 0.65 : 1))
-      .contentShape(Rectangle())
   }
 }
