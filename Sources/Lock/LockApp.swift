@@ -40,6 +40,8 @@ struct LockApp: App {
         _startupService = StateObject(wrappedValue: startupService)
         _activityLog = StateObject(wrappedValue: activityLog)
         _mainWindowController = StateObject(wrappedValue: mainWindowController)
+
+        appDelegate.configure(mainWindowController: mainWindowController)
     }
 
     var body: some Scene {
@@ -74,12 +76,47 @@ struct LockApp: App {
     }
 }
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private weak var mainWindowController: MainWindowController?
+    private var shouldShowMainWindowWhenConfigured = false
+
+    func configure(mainWindowController: MainWindowController) {
+        self.mainWindowController = mainWindowController
+
+        if shouldShowMainWindowWhenConfigured {
+            shouldShowMainWindowWhenConfigured = false
+            showMainWindow()
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+
+        guard !CommandLine.arguments.contains(LaunchArguments.background) else {
+            return
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            self?.showMainWindow()
+        }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showMainWindow()
+        return false
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    private func showMainWindow() {
+        guard let mainWindowController else {
+            shouldShowMainWindowWhenConfigured = true
+            return
+        }
+
+        mainWindowController.show(section: .apps)
     }
 }

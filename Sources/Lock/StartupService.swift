@@ -82,13 +82,13 @@ final class StartupService: ObservableObject {
         let bundlePath = Bundle.main.bundlePath
 
         if bundlePath.hasSuffix(".app") {
-            return ["/usr/bin/open", bundlePath]
+            return ["/usr/bin/open", "-gj", bundlePath, "--args", LaunchArguments.background]
         }
 
         guard let executablePath = Bundle.main.executablePath else {
             throw StartupServiceError.unsupportedExecutable
         }
 
-        return [executablePath]
+        return [executablePath, LaunchArguments.background]
     }
 }
