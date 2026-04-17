@@ -255,7 +255,9 @@ final class OverlayCoordinator: NSObject, ObservableObject {
   }
 
   private func activateForLockPresentation() {
-    NSApp.setActivationPolicy(.regular)
+    if !hasVisibleMainWindow {
+      NSApp.setActivationPolicy(.accessory)
+    }
   }
 
   private func hideLockedApp(_ app: NSRunningApplication, processID: pid_t) {
@@ -348,13 +350,32 @@ final class OverlayCoordinator: NSObject, ObservableObject {
   }
 
   private func restoreAccessoryActivationIfPossible() {
-    guard lockWindows.isEmpty,
-      !NSApp.windows.contains(where: { $0 is MainAppWindow && $0.isVisible })
-    else {
+    restoreAccessoryActivation()
+
+    DispatchQueue.main.async { [weak self] in
+      self?.restoreAccessoryActivation()
+    }
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+      self?.restoreAccessoryActivation()
+    }
+  }
+
+  private func restoreAccessoryActivation() {
+    guard canRestoreAccessoryActivation else {
       return
     }
 
+    NSApp.hide(nil)
     NSApp.setActivationPolicy(.accessory)
+  }
+
+  private var canRestoreAccessoryActivation: Bool {
+    lockWindows.isEmpty && !hasVisibleMainWindow
+  }
+
+  private var hasVisibleMainWindow: Bool {
+    NSApp.windows.contains(where: { $0 is MainAppWindow && $0.isVisible })
   }
 
   private func icon(for app: NSRunningApplication) -> NSImage {
