@@ -2,9 +2,11 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-APP_DIR="$ROOT_DIR/dist/Lock.app"
+source "$ROOT_DIR/scripts/app_metadata.sh"
+
+APP_DIR="$ROOT_DIR/dist/$APP_NAME.app"
 BUILD_CONFIG="release"
-EXECUTABLE="$ROOT_DIR/.build/$BUILD_CONFIG/Lock"
+EXECUTABLE="$ROOT_DIR/.build/$BUILD_CONFIG/$APP_NAME"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
@@ -20,29 +22,31 @@ rm -rf "$ICONSET_DIR"
 swift scripts/make_icon.swift "$ICONSET_DIR"
 iconutil -c icns "$ICONSET_DIR" -o "$ICON_FILE"
 
-cp "$EXECUTABLE" "$MACOS_DIR/Lock"
+cp "$EXECUTABLE" "$MACOS_DIR/$APP_NAME"
 
-cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
+cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>CFBundleDisplayName</key>
-    <string>Lock</string>
+    <string>$APP_NAME</string>
     <key>CFBundleExecutable</key>
-    <string>Lock</string>
+    <string>$APP_NAME</string>
     <key>CFBundleIdentifier</key>
-    <string>com.zohaib.lock</string>
+    <string>$APP_BUNDLE_IDENTIFIER</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundleName</key>
-    <string>Lock</string>
+    <string>$APP_NAME</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>$APP_VERSION</string>
     <key>CFBundleVersion</key>
-    <string>3</string>
+    <string>$APP_BUILD</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>$MIN_MACOS_VERSION</string>
     <key>LSUIElement</key>
     <true/>
 </dict>
@@ -50,6 +54,6 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
 PLIST
 
 touch "$APP_DIR"
-codesign --force --deep --sign - --identifier "com.zohaib.lock" "$APP_DIR"
+codesign --force --deep --sign - --identifier "$APP_BUNDLE_IDENTIFIER" "$APP_DIR"
 
 echo "Built app bundle at: $APP_DIR"

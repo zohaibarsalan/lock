@@ -1,0 +1,7 @@
+#!/bin/zsh
+
+APP_NAME="Lock"
+APP_BUNDLE_IDENTIFIER="com.zohaib.lock"
+APP_VERSION="0.1.0"
+APP_BUILD="3"
+MIN_MACOS_VERSION="14.0"
