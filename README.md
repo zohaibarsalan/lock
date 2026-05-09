@@ -189,6 +189,17 @@ dist/release/Lock-0.1.0.dmg.sha256
 
 The DMG contains `Lock.app` and an `Applications` shortcut.
 
+### CI DMG Builds
+
+GitHub Actions can build the DMG without pushing to `main`.
+
+- Open `Actions`.
+- Select `Build macOS DMG`.
+- Click `Run workflow`.
+- Download the uploaded artifact after the workflow finishes.
+
+The same workflow also runs for pull requests and uploads the generated `.dmg` and `.sha256` files as artifacts.
+
 ### App Version
 
 Version metadata lives in:

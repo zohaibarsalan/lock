@@ -1,6 +1,7 @@
 @preconcurrency import AppKit
 import Combine
 import Foundation
+import OSLog
 
 @MainActor
 final class AppMonitor: ObservableObject {
@@ -9,6 +10,10 @@ final class AppMonitor: ObservableObject {
     private let lockStore: LockStore
     private let overlayCoordinator: OverlayCoordinator
     private let activityLog: ActivityLogStore
+    private let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "com.zohaib.lock",
+        category: "AppMonitor"
+    )
 
     private var observers: [NSObjectProtocol] = []
     private var cancellables: Set<AnyCancellable> = []
@@ -39,7 +44,7 @@ final class AppMonitor: ObservableObject {
                 }
 
                 MainActor.assumeIsolated {
-                    self?.evaluate(app, delay: 0.15)
+                    self?.evaluate(app, delay: 0.15, source: "didLaunch")
                 }
             }
         )
@@ -55,7 +60,7 @@ final class AppMonitor: ObservableObject {
                 }
 
                 MainActor.assumeIsolated {
-                    self?.evaluate(app, delay: 0)
+                    self?.evaluate(app, delay: 0, source: "didActivate")
                 }
             }
         )
@@ -71,7 +76,7 @@ final class AppMonitor: ObservableObject {
                 }
 
                 MainActor.assumeIsolated {
-                    self?.evaluate(app, delay: 0)
+                    self?.evaluate(app, delay: 0, source: "didUnhide")
                 }
             }
         )
@@ -87,6 +92,7 @@ final class AppMonitor: ObservableObject {
                 }
 
                 MainActor.assumeIsolated {
+                    self?.logMonitorEvent("didTerminate", app: app)
                     self?.handleTermination(app: app)
                 }
             }
@@ -105,7 +111,7 @@ final class AppMonitor: ObservableObject {
         )
 
         for app in workspace.runningApplications {
-            evaluate(app, delay: 0)
+            evaluate(app, delay: 0, source: "startup")
         }
 
         scheduleInitialSweep()
@@ -115,6 +121,7 @@ final class AppMonitor: ObservableObject {
         lockStore.$protectedApps
             .receive(on: DispatchQueue.main)
             .sink { [weak self] apps in
+                self?.logger.debug("protected-apps changed count=\(apps.count, privacy: .public)")
                 self?.handleProtectedAppsChange(apps)
             }
             .store(in: &cancellables)
@@ -123,6 +130,7 @@ final class AppMonitor: ObservableObject {
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] hasPassword in
+                self?.logger.debug("password-state changed hasPassword=\(hasPassword, privacy: .public)")
                 self?.handlePasswordStateChange(hasPassword)
             }
             .store(in: &cancellables)
@@ -163,7 +171,7 @@ final class AppMonitor: ObservableObject {
 
     private func evaluateRunningApplications() {
         for app in workspace.runningApplications {
-            evaluate(app, delay: 0)
+            evaluate(app, delay: 0, source: "runningSweep")
         }
     }
 
@@ -181,10 +189,11 @@ final class AppMonitor: ObservableObject {
             return
         }
 
-        evaluate(app, delay: 0)
+        evaluate(app, delay: 0, source: "frontmost")
     }
 
     private func handleActiveSpaceChange() {
+        logger.debug("active-space changed")
         overlayCoordinator.rehideLockedAppsForSpaceChange()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
@@ -192,7 +201,7 @@ final class AppMonitor: ObservableObject {
         }
     }
 
-    private func evaluate(_ app: NSRunningApplication, delay: TimeInterval) {
+    private func evaluate(_ app: NSRunningApplication, delay: TimeInterval, source: String) {
         guard lockStore.hasPassword else {
             return
         }
@@ -203,22 +212,30 @@ final class AppMonitor: ObservableObject {
         }
 
         guard app.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
+            logMonitorEvent("skip", app: app, detail: "self")
             return
         }
 
         let pid = app.processIdentifier
 
         if overlayCoordinator.isPresentingLock(for: pid) {
+            logMonitorEvent("reassert-existing", app: app, detail: "source=\(source)")
             overlayCoordinator.reassertLock(for: app)
             return
         }
 
         guard !unlockedProcessIDs.contains(pid),
               !pendingProcessIDs.contains(pid) else {
+            logMonitorEvent(
+                "skip",
+                app: app,
+                detail: "source=\(source) unlocked=\(unlockedProcessIDs.contains(pid)) pending=\(pendingProcessIDs.contains(pid))"
+            )
             return
         }
 
         pendingProcessIDs.insert(pid)
+        logMonitorEvent("pending", app: app, detail: "source=\(source) delay=\(delay)")
 
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self else {
@@ -229,13 +246,20 @@ final class AppMonitor: ObservableObject {
 
             guard !self.unlockedProcessIDs.contains(pid),
                   !app.isTerminated else {
+                self.logMonitorEvent(
+                    "pending-cancelled",
+                    app: app,
+                    detail: "unlocked=\(self.unlockedProcessIDs.contains(pid)) terminated=\(app.isTerminated)"
+                )
                 return
             }
 
+            self.logMonitorEvent("present-lock", app: app, detail: "source=\(source)")
             self.activityLog.record("App Locked", detail: app.localizedName ?? bundleIdentifier)
             self.overlayCoordinator.presentLock(for: app) { unlocked in
                 if unlocked {
                     self.unlockedProcessIDs.insert(pid)
+                    self.logMonitorEvent("marked-unlocked", app: app)
                 }
             }
         }
@@ -246,5 +270,11 @@ final class AppMonitor: ObservableObject {
         unlockedProcessIDs.remove(pid)
         pendingProcessIDs.remove(pid)
         overlayCoordinator.dismissIfMatching(processID: pid)
+    }
+
+    private func logMonitorEvent(_ event: String, app: NSRunningApplication, detail: String = "") {
+        logger.debug(
+            "event=\(event, privacy: .public) pid=\(app.processIdentifier, privacy: .public) app=\(app.localizedName ?? "unknown", privacy: .public) bundle=\(app.bundleIdentifier ?? "unknown", privacy: .public) \(detail, privacy: .public)"
+        )
     }
 }
